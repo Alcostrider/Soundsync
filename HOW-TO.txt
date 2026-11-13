@@ -8,7 +8,12 @@ Two parts:
      Optional, but it lets you change the delay live with a quick-settings
      button. Install it like any APK.
 
-BUILD THE PATCH SOURCE (PC, about 10 minutes the first time)
+EASIEST: ADD THIS REPOSITORY AS A SOURCE
+  Morphe Manager > Add patch source > Remote > paste the repository address
+  (https://github.com/Alcostrider/Soundsync). Manager then offers updates by
+  itself. The SoundSync app is in each release on GitHub.
+
+OR BUILD THE PATCH SOURCE YOURSELF (PC, about 10 minutes the first time)
   1. Unzip this folder to a short path, e.g. C:\SoundSync
   2. Double-click BUILD.bat. It asks for your GitHub username and token
      (classic token, only "read:packages" ticked) and offers to remember them.

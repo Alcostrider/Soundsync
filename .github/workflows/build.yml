@@ -1,12 +1,23 @@
-name: Build patches
+name: Build and release
+
+# Every push to main builds the patches and the SoundSync app.
+# When gradle.properties has a version with no release yet, it also publishes
+# "Soundsync vX" (patch bundle + app) and updates patches-bundle.json, which is
+# what Morphe Manager reads when this repository is added as a patch source.
 
 on:
   push:
+    branches: [main]
+    paths-ignore: [patches-bundle.json]
   workflow_dispatch:
 
 permissions:
-  contents: write   # to publish the bundle as a release of this (private) repository
-  packages: read
+  contents: write   # releases and patches-bundle.json
+  packages: read    # Morphe's build tools
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -21,26 +32,83 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
+      - name: Read the version
+        id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v=$(sed -nE 's/^version *= *([^ ]+).*/\1/p' gradle.properties | tr -d '[:space:]')
+          [ -n "$v" ] || { echo "::error::No version in gradle.properties"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Soundsync v$v is already released; this run only checks that everything builds."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build the patch bundle
         env:
           # Morphe's build tools come from GitHub Packages; the workflow's own token can read them.
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew :patches:buildAndroid --no-daemon --stacktrace
-
-      - name: Show what's in the bundle
         run: |
-          for f in patches/build/libs/*.mpp; do
-            echo "== $f"; unzip -l "$f"
-          done
+          ./gradlew :patches:buildAndroid --no-daemon --stacktrace
+          cp patches/build/libs/*.mpp "SoundSync-patches-${{ steps.v.outputs.version }}.mpp"
+          unzip -l "SoundSync-patches-${{ steps.v.outputs.version }}.mpp"
 
-      - name: Publish as the "latest" release
-        if: github.ref == 'refs/heads/main'
+      - name: Build the SoundSync app
+        env:
+          KS_B64: ${{ secrets.SOUNDSYNC_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.SOUNDSYNC_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PW" ]; then
+            echo "::warning::The signing key secrets aren't set, so the SoundSync app isn't built."
+            exit 0
+          fi
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/soundsync.jks"
+          companion-app/ci-build.sh "${{ github.run_number }}" "${{ steps.v.outputs.version }}" \
+            "$RUNNER_TEMP/soundsync.jks" "$KS_PW"
+          cp companion-app/build/soundsync.apk "SoundSync-app-${{ steps.v.outputs.version }}.apk"
+          rm -f "$RUNNER_TEMP/soundsync.jks"
+
+      - name: Publish Soundsync v${{ steps.v.outputs.version }}
+        if: steps.v.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.v.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
-          cp patches/build/libs/*.mpp SoundSync-patches.mpp
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest SoundSync-patches.mpp \
-            --title "SoundSync patches (build ${{ github.run_number }})" \
-            --notes "Built from ${{ github.sha }}. In Morphe Manager: Add patch source > Local > pick SoundSync-patches.mpp."
+          if [ ! -f "SoundSync-app-$V.apk" ]; then
+            echo "::warning::Not releasing v$V yet: add the signing key secrets so the app can be included, then push again."
+            exit 0
+          fi
+          notes="release-notes/$V.md"
+          [ -f "$notes" ] || { echo "Soundsync v$V" > "$RUNNER_TEMP/notes.md"; notes="$RUNNER_TEMP/notes.md"; }
+          files=("SoundSync-patches-$V.mpp")
+          [ -f "SoundSync-app-$V.apk" ] && files+=("SoundSync-app-$V.apk")
+          gh release create "v$V" "${files[@]}" --title "Soundsync v$V" --notes-file "$notes" --latest
+
+          # The old rolling release from before versioned releases
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+
+          # What Morphe Manager reads from this repository's main branch
+          python3 - "$V" "$REPO" "$notes" <<'PY'
+          import json, sys, datetime
+          version, repo, notes = sys.argv[1], sys.argv[2], sys.argv[3]
+          bundle = {
+              "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+              "description": open(notes, encoding="utf-8").read().strip(),
+              "download_url": f"https://github.com/{repo}/releases/download/v{version}/SoundSync-patches-{version}.mpp",
+              "version": version,
+          }
+          with open("patches-bundle.json", "w", encoding="utf-8") as f:
+              json.dump(bundle, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          PY
+          cat patches-bundle.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add patches-bundle.json
+          git commit -m "chore: patches-bundle.json for Soundsync v$V [skip ci]"
+          git push

@@ -135,3 +135,8 @@ local.properties
 github-login.txt
 _tools/
 SoundSync-patches.mpp
+
+# Signing keys live in GitHub secrets, never in the repository
+*.jks
+*.keystore
+companion-app/build/
