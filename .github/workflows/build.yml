@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # to publish the bundle as a release of this (private) repository
   packages: read
 
 jobs:
@@ -28,9 +28,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew :patches:buildAndroid --no-daemon --stacktrace
 
-      - name: Keep the bundle
-        uses: actions/upload-artifact@v5
-        with:
-          name: SoundSync-patches
-          path: patches/build/libs/*.mpp
-          if-no-files-found: error
+      - name: Show what's in the bundle
+        run: |
+          for f in patches/build/libs/*.mpp; do
+            echo "== $f"; unzip -l "$f"
+          done
+
+      - name: Publish as the "latest" release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp patches/build/libs/*.mpp SoundSync-patches.mpp
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest SoundSync-patches.mpp \
+            --title "SoundSync patches (build ${{ github.run_number }})" \
+            --notes "Built from ${{ github.sha }}. In Morphe Manager: Add patch source > Local > pick SoundSync-patches.mpp."
