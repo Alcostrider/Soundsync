@@ -4,6 +4,9 @@ name: Build and release
 # When gradle.properties has a version with no release yet, it also publishes
 # "Soundsync vX" (patch bundle + app) and updates patches-bundle.json, which is
 # what Morphe Manager reads when this repository is added as a patch source.
+#
+# To rebuild a version that's already released, put [republish] in the commit message.
+# Releases of a higher version than gradle.properties (after going back a version) are removed.
 
 on:
   push:
@@ -36,11 +39,15 @@ jobs:
         id: v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MSG: ${{ github.event.head_commit.message }}
         run: |
           v=$(sed -nE 's/^version *= *([^ ]+).*/\1/p' gradle.properties | tr -d '[:space:]')
           [ -n "$v" ] || { echo "::error::No version in gradle.properties"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if gh release view "v$v" >/dev/null 2>&1; then
+          if gh release view "v$v" >/dev/null 2>&1 && printf '%s' "$MSG" | grep -qF '[republish]'; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Rebuilding Soundsync v$v ([republish])."
+          elif gh release view "v$v" >/dev/null 2>&1; then
             echo "release=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Soundsync v$v is already released; this run only checks that everything builds."
           else
@@ -87,7 +94,18 @@ jobs:
           [ -f "$notes" ] || { echo "Soundsync v$V" > "$RUNNER_TEMP/notes.md"; notes="$RUNNER_TEMP/notes.md"; }
           files=("SoundSync-patches-$V.mpp")
           [ -f "SoundSync-app-$V.apk" ] && files+=("SoundSync-app-$V.apk")
-          gh release create "v$V" "${files[@]}" --title "Soundsync v$V" --notes-file "$notes" --latest
+
+          # Replace this version if it's being republished, and remove any higher versions
+          for t in $(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -E '^v[0-9]'); do
+            n=${t#v}
+            if [ "$n" = "$V" ] || [ "$(printf '%s\n%s\n' "$V" "$n" | sort -V | tail -1)" = "$n" ]; then
+              echo "Removing release $t"
+              gh release delete "$t" --yes --cleanup-tag
+            fi
+          done
+
+          gh release create "v$V" "${files[@]}" --target "$GITHUB_SHA" \
+            --title "Soundsync v$V" --notes-file "$notes" --latest
 
           # The old rolling release from before versioned releases
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
