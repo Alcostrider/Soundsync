@@ -15,7 +15,7 @@ YouTube, Instagram, Facebook and Reddit.
 
 1. In Morphe Manager: **Add patch source → Remote**, and paste this repository's address.
 2. Patch an app as usual, with its normal patch source too. In **Expert mode**, under
-   **Universal patches**, tick **Android Auto audio sync** and set the delay (750 ms is a good start).
+   **Universal patches**, tick **Android Auto audio sync** and set the delay (750 ms is a good start, this can be adjusted later).
 3. Install the **SoundSync app** from the [latest release](../../releases/latest). Set the delay
    there and add its quick-settings button, which opens a small −/+ panel over a playing video.
 
