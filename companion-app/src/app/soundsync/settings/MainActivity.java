@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
         });
 
         col.addView(text("SoundSync", 30, true));
-        TextView sub = text("Holds the picture back in patched apps, so it lines up with the sound "
+        TextView sub = text("Holds the video back in patched apps, so it lines up with the sound "
                 + "from the car.", 15, false);
         sub.setPadding(0, controls.dp(4), 0, controls.dp(8));
         col.addView(sub);
@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
         LinearLayout c1 = card(col, "Video delay");
         c1.addView(controls.delayView(true));
         c1.addView(text("Start around 750 ms (the same as −750 ms in Fermata's audio delay: "
-                + "there you move the sound, here you move the picture). Watch someone talking "
+                + "there you move the sound, here you move the video). Watch someone talking "
                 + "and adjust until lips match the sound. If the lips now come after the sound, "
                 + "go lower. Changes apply straight away, even mid-video.", 14, false));
 

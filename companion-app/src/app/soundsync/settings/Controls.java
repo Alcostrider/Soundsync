@@ -35,7 +35,7 @@ final class Controls {
         col.setOrientation(LinearLayout.VERTICAL);
 
         TextView caption = new TextView(ctx);
-        caption.setText("Picture held back by");
+        caption.setText("Video held back by:");
         caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         caption.setGravity(Gravity.CENTER);
         col.addView(caption, match());
