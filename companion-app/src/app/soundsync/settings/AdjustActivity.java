@@ -26,7 +26,7 @@ public class AdjustActivity extends Activity {
         col.setPadding(pad, pad, pad, controls.dp(12));
 
         TextView title = new TextView(this);
-        title.setText("Video delay");
+        title.setText("SoundSync");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         col.addView(title);
 

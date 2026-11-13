@@ -2,13 +2,17 @@ package app.soundsync.extension;
 
 import android.app.Application;
 import android.app.UiModeManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.media.AudioTimestamp;
 import android.media.AudioTrack;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
@@ -41,7 +45,13 @@ public final class AudioSync {
     public static final int MODE_ANDROID_AUTO = 1;
     public static final int MODE_ALWAYS = 2;
 
-    private static final long CAR_CHECK_INTERVAL_MS = 2000;
+    /** Android Auto's own "is a car connected?" lookup (the androidx car app library uses it). */
+    private static final Uri CAR_CONNECTION = Uri.parse("content://androidx.car.app.connection");
+    private static final String CAR_CONNECTION_STATE = "CarConnectionState";
+    private static final String CAR_CONNECTION_UPDATED =
+            "androidx.car.app.connection.action.CAR_CONNECTION_UPDATED";
+
+    private static final long CAR_CHECK_INTERVAL_MS = 3000;
     private static final int MAX_DELAY_MS = 5000;
 
     /** Replaced by the patch with the delay chosen when patching. */
@@ -60,7 +70,9 @@ public final class AudioSync {
     private static volatile Context context;
     private static volatile boolean inCar;
     private static volatile long carCheckedAt = -CAR_CHECK_INTERVAL_MS;
+    private static volatile boolean carCheckQueued;
     private static volatile boolean lastActive;
+    private static String lastCarState = "";
     private static Handler handler;
 
     /** Per AudioTrack: whether its play position has already passed the delay once. */
@@ -124,20 +136,96 @@ public final class AudioSync {
         return active ? delayUs : 0;
     }
 
-    /** Car mode is on while the phone is connected to Android Auto. Checked every 2 s. */
+    /**
+     * Whether the phone is connected to Android Auto. The player only reads the last answer; the
+     * check itself runs on the SoundSync thread, at most every 3 s while something plays, and
+     * straight away when Android Auto announces a change.
+     */
     private static boolean isInCar() {
         long now = SystemClock.elapsedRealtime();
-        if (now - carCheckedAt < CAR_CHECK_INTERVAL_MS) return inCar;
-        carCheckedAt = now;
-        Context c = context;
-        if (c == null) return inCar;
-        try {
-            UiModeManager ui = (UiModeManager) c.getSystemService(Context.UI_MODE_SERVICE);
-            inCar = (ui != null) && (ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_CAR);
-        } catch (Throwable t) {
-            inCar = false;
+        if ((now - carCheckedAt >= CAR_CHECK_INTERVAL_MS) && !carCheckQueued && (handler != null)) {
+            carCheckQueued = true;
+            carCheckedAt = now;
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    carCheckQueued = false;
+                    checkCar();
+                }
+            });
         }
         return inCar;
+    }
+
+    // Runs on the SoundSync thread.
+    private static void checkCar() {
+        Context c = context;
+        if (c == null) return;
+        String state;
+        boolean connected;
+        int aa = queryCarConnection(c);
+        if (aa > 0) {
+            connected = true;
+            state = (aa == 2) ? "Android Auto connected" : "car connected (type " + aa + ")";
+        } else if (isCarMode(c)) {
+            connected = true;
+            state = "car mode on";
+        } else {
+            connected = false;
+            state = (aa == 0) ? "Android Auto not connected"
+                    : "Android Auto status not available (" + aa + "), car mode off";
+        }
+        inCar = connected;
+        if (!state.equals(lastCarState)) {
+            lastCarState = state;
+            Log.i(TAG, "Car check: " + state);
+        }
+    }
+
+    /** 0 = not connected, 1 = car's own system, 2 = Android Auto; negative = couldn't ask. */
+    private static int queryCarConnection(Context c) {
+        Cursor cursor = null;
+        try {
+            cursor = c.getContentResolver().query(CAR_CONNECTION,
+                    new String[]{CAR_CONNECTION_STATE}, null, null, null);
+            if (cursor == null) return -1;
+            int col = cursor.getColumnIndex(CAR_CONNECTION_STATE);
+            if (col < 0) return -2;
+            if (!cursor.moveToFirst()) return -3;
+            return cursor.getInt(col);
+        } catch (Throwable t) {
+            return -4;
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+    }
+
+    private static boolean isCarMode(Context c) {
+        try {
+            UiModeManager ui = (UiModeManager) c.getSystemService(Context.UI_MODE_SERVICE);
+            return (ui != null) && (ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_CAR);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void listenForCar(Context c) {
+        try {
+            BroadcastReceiver r = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, Intent intent) {
+                    checkCar();
+                }
+            };
+            IntentFilter f = new IntentFilter(CAR_CONNECTION_UPDATED);
+            if (Build.VERSION.SDK_INT >= 33) {
+                c.registerReceiver(r, f, null, handler, 2 /* Context.RECEIVER_EXPORTED */);
+            } else {
+                c.registerReceiver(r, f, null, handler);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Can't listen for Android Auto changes; checking every few seconds instead");
+        }
     }
 
     private static synchronized void start() {
@@ -167,6 +255,8 @@ public final class AudioSync {
         }
         context = c;
         loadSettings();
+        listenForCar(c);
+        checkCar();
         try {
             c.getContentResolver().registerContentObserver(CONFIG, false, new ContentObserver(handler) {
                 @Override
@@ -190,7 +280,6 @@ public final class AudioSync {
                 int m = cursor.getInt(cursor.getColumnIndexOrThrow("mode"));
                 delayUs = clampMs(d) * 1000L;
                 mode = ((m >= MODE_OFF) && (m <= MODE_ALWAYS)) ? m : MODE_ANDROID_AUTO;
-                carCheckedAt = -CAR_CHECK_INTERVAL_MS;
                 Log.i(TAG, "Settings from the SoundSync app: delay " + d + " ms, mode " + mode);
             }
         } catch (Throwable t) {

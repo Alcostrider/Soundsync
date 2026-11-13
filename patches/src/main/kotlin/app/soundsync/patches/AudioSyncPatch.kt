@@ -22,6 +22,7 @@ private const val EXTENSION_CLASS = "Lapp/soundsync/extension/AudioSync;"
 private const val AUDIO_TRACK = "Landroid/media/AudioTrack;"
 private const val AUDIO_TIMESTAMP = "Landroid/media/AudioTimestamp;"
 private const val SETTINGS_AUTHORITY = "app.soundsync.settings"
+private const val CAR_CONNECTION_AUTHORITY = "androidx.car.app.connection"
 
 /**
  * Code that must keep the real audio position: our own extension, and voice/video call engines,
@@ -118,11 +119,14 @@ val androidAutoAudioSyncPatch = patch(
     execute {
         val logger = Logger.getLogger("SoundSync")
 
-        // Let the patched app read the SoundSync app's settings (Android 11+ hides other apps' providers).
+        // Let the patched app read the SoundSync app's settings and ask Android Auto whether it's
+        // connected (Android 11+ hides other apps' providers unless they're listed here).
         resourceXml("AndroidManifest.xml").use { manifest ->
             manifest.root.appendChild("queries") {
-                appendChild("provider") {
-                    setAttribute("android:authorities", SETTINGS_AUTHORITY)
+                for (authority in listOf(SETTINGS_AUTHORITY, CAR_CONNECTION_AUTHORITY)) {
+                    appendChild("provider") {
+                        setAttribute("android:authorities", authority)
+                    }
                 }
             }
         }

@@ -8,6 +8,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Icon;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
@@ -23,6 +25,15 @@ import java.util.function.Consumer;
 /** Main screen: the delay, when to apply it, and how to set things up. */
 public class MainActivity extends Activity {
     private Controls controls;
+    private TextView carStatus;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable pollCar = new Runnable() {
+        @Override
+        public void run() {
+            carStatus.setText(CarStatus.describe(MainActivity.this));
+            main.postDelayed(this, 2000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -52,11 +63,16 @@ public class MainActivity extends Activity {
 
         LinearLayout c1 = card(col, "Video delay");
         c1.addView(controls.delayView(true));
-        c1.addView(text("Start around 750 ms. Watch someone talking and adjust until lips "
-                + "match the sound. Changes apply straight away, even mid-video.", 14, false));
+        c1.addView(text("Start around 750 ms (the same as −750 ms in Fermata's audio delay: "
+                + "there you move the sound, here you move the picture). Watch someone talking "
+                + "and adjust until lips match the sound. If the lips now come after the sound, "
+                + "go lower. Changes apply straight away, even mid-video.", 14, false));
 
         LinearLayout c2 = card(col, "When to apply");
         c2.addView(controls.modeView());
+        carStatus = text("", 14, false);
+        carStatus.setPadding(0, controls.dp(8), 0, 0);
+        c2.addView(carStatus);
 
         LinearLayout c3 = card(col, "Quick button");
         c3.addView(text("Adds SoundSync to your quick settings. Tap it while a video plays to "
@@ -86,6 +102,13 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         controls.refresh();
+        main.post(pollCar);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        main.removeCallbacks(pollCar);
     }
 
     private void addTile() {
