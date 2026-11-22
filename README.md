@@ -2,7 +2,7 @@
 
 Keeps video in sync with the sound from the car when you watch on your phone over **wireless Android Auto**, or even when using the patched apps while inside of Android Auto.
 
-Wireless Android Auto plays sound noticeably later than the phone expects, and video players don't
+Connecting to Wireless Android Auto and playing media - the sound plays noticeably later than the phone expects, and video players don't
 know about the extra delay, so lipsync is off and sounds are not in sync with video. Soundsync is a
 [Morphe](https://morphe.software) patch source with one universal patch, **Android Auto audio sync**,
 that makes an app's video player hold the video back by your delay. The sound itself is untouched,
